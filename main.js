@@ -1,0 +1,176 @@
+// Local Whisper — Electron Main Process
+// =======================================
+// Replaces app/src-tauri/src/lib.rs
+//
+// Flow:
+//   ⌥⇧Space keydown  → send 'hotkey-press' to renderer → MediaRecorder starts
+//   ⌥⇧Space keyup    → send 'hotkey-release' to renderer → MediaRecorder stops
+//   Renderer          → Transformers.js Whisper transcribes
+//   Renderer          → invokes 'paste-text' → main pastes via pbcopy + osascript
+
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } from "electron";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { execFile, execFileSync } from "child_process";
+import { uIOhook, UiohookKey } from "uiohook-napi";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+let mainWindow = null;
+let tray = null;
+
+// Track modifier state for ⌥⇧Space detection
+let altHeld = false;
+let shiftHeld = false;
+let recordingActive = false;
+
+// ─── Window ──────────────────────────────────────────────────────────────────
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 320,
+    height: 180,
+    resizable: true,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, "preload.cjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  mainWindow.loadFile(join(__dirname, "dist", "index.html"));
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    mainWindow.center();
+  });
+
+  // Open DevTools with Cmd+Option+I
+  mainWindow.webContents.on("before-input-event", (_e, input) => {
+    if (input.meta && input.alt && input.key === "i") {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
+  });
+}
+
+// ─── Tray ────────────────────────────────────────────────────────────────────
+
+function createTray() {
+  const iconPath = join(__dirname, "icons", "tray-idle.png");
+  const icon = nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 });
+  icon.setTemplateImage(true);
+
+  tray = new Tray(icon);
+  tray.setToolTip("Local Whisper — Ready (⌥⇧Space)");
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: "Show / Hide",
+      click: toggleWindow,
+    },
+    { type: "separator" },
+    {
+      label: "Quit Local Whisper",
+      click: () => app.quit(),
+    },
+  ]);
+
+  tray.setContextMenu(menu);
+  tray.on("click", toggleWindow);
+}
+
+function toggleWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isVisible()) {
+    mainWindow.hide();
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+// ─── Global Hotkey (⌥⇧Space PTT) ────────────────────────────────────────────
+// uiohook-napi exposes true keydown/keyup — required for PTT press-and-hold.
+// Electron's globalShortcut only fires on press, not release.
+
+function setupHotkey() {
+  uIOhook.on("keydown", (e) => {
+    if (e.keycode === UiohookKey.Alt)   altHeld = true;
+    if (e.keycode === UiohookKey.Shift) shiftHeld = true;
+
+    // Toggle on ⌥⇧Space — ignore key-repeat events
+    if (e.keycode === UiohookKey.Space && altHeld && shiftHeld && !e.repeat) {
+      recordingActive = !recordingActive;
+      mainWindow?.webContents.send("hotkey-toggle");
+    }
+  });
+
+  uIOhook.on("keyup", (e) => {
+    if (e.keycode === UiohookKey.Alt)   altHeld = false;
+    if (e.keycode === UiohookKey.Shift) shiftHeld = false;
+  });
+
+  uIOhook.start();
+}
+
+// ─── IPC Handlers ────────────────────────────────────────────────────────────
+
+ipcMain.handle("paste-text", async (_event, text) => {
+  return pasteText(text);
+});
+
+ipcMain.handle("set-tray-state", (_event, state) => {
+  if (!tray) return;
+  const tooltips = {
+    recording:    "Local Whisper — 🔴 Recording...",
+    transcribing: "Local Whisper — ⏳ Transcribing...",
+    error:        "Local Whisper — ❌ Error",
+  };
+  tray.setToolTip(tooltips[state] ?? "Local Whisper — Ready (⌥⇧Space)");
+});
+
+// ─── Paste ───────────────────────────────────────────────────────────────────
+
+function pasteText(text) {
+  return new Promise((resolve, reject) => {
+    const pbcopy = execFile("pbcopy", (err) => {
+      if (err) return reject(new Error(`pbcopy: ${err.message}`));
+      setTimeout(() => {
+        execFile(
+          "osascript",
+          ["-e", 'tell application "System Events" to keystroke "v" using {command down}'],
+          (err2) => {
+            if (err2) reject(new Error(`osascript: ${err2.message}`));
+            else resolve();
+          }
+        );
+      }, 80);
+    });
+    pbcopy.stdin.write(text);
+    pbcopy.stdin.end();
+  });
+}
+
+// ─── App Lifecycle ───────────────────────────────────────────────────────────
+
+app.whenReady().then(() => {
+  app.dock.hide(); // menubar-only, no Dock icon
+
+  createWindow();
+  createTray();
+  setupHotkey();
+});
+
+app.on("window-all-closed", (e) => {
+  // Prevent quitting when window is closed — stay in tray
+  e.preventDefault();
+});
+
+app.on("before-quit", () => {
+  uIOhook.stop();
+});
