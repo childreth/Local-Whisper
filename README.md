@@ -16,7 +16,7 @@ Release          →  Whisper transcribes on-device
 
 **Stack:**
 - **Electron + Svelte** — native macOS menubar app
-- **@huggingface/transformers** — runs Whisper fully on-device
+- **@huggingface/transformers** — runs `onnx-community/whisper-small` via WebGPU (WASM fallback)
 - **uiohook-napi** — global hotkey capture
 
 ---
