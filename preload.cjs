@@ -3,7 +3,8 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("electron", {
-  onHotkeyToggle: (cb) => ipcRenderer.on("hotkey-toggle", () => cb()),
-  pasteText:       (text)  => ipcRenderer.invoke("paste-text",     text),
-  setTrayState:    (state) => ipcRenderer.invoke("set-tray-state", state),
+  onHotkeyToggle:     (cb) => ipcRenderer.on("hotkey-toggle",     () => cb()),
+  onHotkeyUnavailable:(cb) => ipcRenderer.on("hotkey-unavailable",() => cb()),
+  pasteText:          (text)  => ipcRenderer.invoke("paste-text",     text),
+  setTrayState:       (state) => ipcRenderer.invoke("set-tray-state", state),
 });

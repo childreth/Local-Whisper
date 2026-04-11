@@ -8,7 +8,7 @@
 //   Renderer          → Transformers.js Whisper transcribes
 //   Renderer          → invokes 'paste-text' → main pastes via pbcopy + osascript
 
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } from "electron";
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, systemPreferences } from "electron";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { execFile, execFileSync } from "child_process";
@@ -45,9 +45,22 @@ function createWindow() {
 
   mainWindow.loadFile(join(__dirname, "dist", "index.html"));
 
+  // Primary: show on first paint
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
     mainWindow.center();
+  });
+
+  // Fallback: ready-to-show can silently not fire in packaged builds
+  mainWindow.webContents.once("did-finish-load", () => {
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+      mainWindow.center();
+    }
+  });
+
+  mainWindow.webContents.on("did-fail-load", (_e, code, desc) => {
+    console.error(`[main] page failed to load: ${code} ${desc}`);
   });
 
   // Open DevTools with Cmd+Option+I
@@ -72,6 +85,10 @@ function createTray() {
     {
       label: "Show / Hide",
       click: toggleWindow,
+    },
+    {
+      label: "Open DevTools",
+      click: () => mainWindow?.webContents.openDevTools({ mode: "detach" }),
     },
     { type: "separator" },
     {
@@ -115,7 +132,27 @@ function setupHotkey() {
     if (e.keycode === UiohookKey.Shift) shiftHeld = false;
   });
 
-  uIOhook.start();
+  // On macOS, uiohook needs Accessibility permission.
+  // After re-signing the app, macOS resets the grant — check explicitly.
+  const trusted = systemPreferences.isTrustedAccessibilityClient(false);
+  if (!trusted) {
+    console.warn("[hotkey] Accessibility permission not granted — prompting user");
+    // Trigger the system prompt (opens the dialog)
+    systemPreferences.isTrustedAccessibilityClient(true);
+    mainWindow?.webContents.once("did-finish-load", () => {
+      mainWindow.webContents.send("hotkey-unavailable");
+    });
+    return;
+  }
+
+  try {
+    uIOhook.start();
+  } catch (err) {
+    console.error("[hotkey] uIOhook failed to start:", err);
+    mainWindow?.webContents.once("did-finish-load", () => {
+      mainWindow.webContents.send("hotkey-unavailable");
+    });
+  }
 }
 
 // ─── IPC Handlers ────────────────────────────────────────────────────────────

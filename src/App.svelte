@@ -3,7 +3,7 @@
   import { initWhisper, transcribeBuffer } from "./lib/whisper.js";
 
   // ─── State ──────────────────────────────────────────────────────────────
-  /** @type {"loading" | "idle" | "recording" | "transcribing" | "error"} */
+  /** @type {"loading" | "idle" | "recording" | "transcribing" | "error" | "needs-permission"} */
   let appState    = "loading";
   let lastText    = "";
   let errorMsg    = "";
@@ -95,6 +95,10 @@
       if (appState === "idle") startRecording();
       else if (appState === "recording") stopRecording();
     });
+
+    window.electron?.onHotkeyUnavailable(() => {
+      appState = "needs-permission";
+    });
   });
 
   onDestroy(() => {
@@ -145,6 +149,13 @@
       <span class="dot red"></span>
       <span class="error-text">{errorMsg || "Transcription failed"}</span>
     </div>
+
+  {:else if appState === "needs-permission"}
+    <div class="status">
+      <span class="dot red"></span>
+      <span>Accessibility permission required</span>
+    </div>
+    <p class="hint">Grant access in System Settings → Privacy &amp; Security → Accessibility, then relaunch.</p>
   {/if}
 
   <footer>⌥⇧Space to start / stop</footer>

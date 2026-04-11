@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "electron:dev": "vite build --watch & sleep 3 && electron . --inspect",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "vite build && electron-builder && codesign --force --deep --sign - 'dist/mac-arm64/Local Whisper.app' && xattr -cr 'dist/mac-arm64/Local Whisper.app'"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.0.1",
@@ -29,7 +29,7 @@
     "files": [
       "dist/**/*",
       "main.js",
-      "preload.js",
+      "preload.cjs",
       "icons/**/*"
     ],
     "mac": {
