@@ -2,22 +2,22 @@
 
 A macOS menubar app that transcribes speech locally using **Whisper** — no cloud, no subscription, no data leaving your machine.
 
-Hold a hotkey, speak, release — your words appear wherever your cursor is.
+Press **⌃⇧Space** to start recording, press again to stop — your words are transcribed and pasted wherever your cursor is.
 
 ---
 
 ## How it works
 
 ```
-Hold hotkey      →  audio captured locally
-Release          →  Whisper transcribes on-device
+⌃⇧Space          →  audio captured locally
+⌃⇧Space again    →  Whisper transcribes on-device
                     Result pasted into focused app via osascript
 ```
 
 **Stack:**
 - **Electron + Svelte** — native macOS menubar app
 - **@huggingface/transformers** — runs `onnx-community/whisper-small` via WebGPU (WASM fallback)
-- **uiohook-napi** — global hotkey capture
+- **Electron globalShortcut** — Carbon-level global hotkey
 
 ---
 
@@ -59,9 +59,7 @@ chmod +x build-mac.sh
 
 > On first launch after a build, macOS will ask for **Microphone** permission. Approve it.
 
-You also need these toggled on in **System Settings → Privacy & Security:**
-- **Accessibility** — for paste simulation
-- **Input Monitoring** — for the global hotkey
+You also need **Accessibility** toggled on in **System Settings → Privacy & Security** — used for paste simulation via `osascript`.
 
 ---
 
@@ -89,4 +87,3 @@ Local Whisper/
 macOS requires explicit permission for:
 - **Microphone** — to record audio
 - **Accessibility** — to paste text into other apps
-- **Input Monitoring** — to capture the global hotkey

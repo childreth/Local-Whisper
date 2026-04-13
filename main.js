@@ -1,33 +1,19 @@
 // Local Whisper — Electron Main Process
-// =======================================
-// Replaces app/src-tauri/src/lib.rs
 //
 // Flow:
-//   ⌥⇧Space keydown  → send 'hotkey-press' to renderer → MediaRecorder starts
-//   ⌥⇧Space keyup    → send 'hotkey-release' to renderer → MediaRecorder stops
-//   Renderer          → Transformers.js Whisper transcribes
-//   Renderer          → invokes 'paste-text' → main pastes via pbcopy + osascript
+//   ⌃⇧Space          → globalShortcut → send 'hotkey-toggle' to renderer
+//   Renderer         → MediaRecorder → Transformers.js Whisper transcribes
+//   Renderer         → invokes 'paste-text' → main pastes via pbcopy + osascript
 
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, systemPreferences } from "electron";
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, globalShortcut } from "electron";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { execFile, execFileSync } from "child_process";
-import { uIOhook, UiohookKey } from "uiohook-napi";
+import { execFile } from "child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let mainWindow = null;
 let tray = null;
-
-// Track modifier state for ⌥⇧Space detection
-let altHeld = false;
-let shiftHeld = false;
-let recordingActive = false;
-let lastToggleMs = 0;
-
-// Set to false if accessibility permission is missing so the renderer
-// can query it synchronously after mounting (race-condition fix).
-let accessibilityGranted = true;
 
 // ─── Window ──────────────────────────────────────────────────────────────────
 
@@ -84,7 +70,7 @@ function createTray() {
   icon.setTemplateImage(true);
 
   tray = new Tray(icon);
-  tray.setToolTip("Local Whisper — Ready (⌥⇧Space)");
+  tray.setToolTip("Local Whisper — Ready (⌃⇧Space)");
 
   const menu = Menu.buildFromTemplate([
     {
@@ -116,52 +102,13 @@ function toggleWindow() {
   }
 }
 
-// ─── Global Hotkey (⌥⇧Space PTT) ────────────────────────────────────────────
-// uiohook-napi exposes true keydown/keyup — required for PTT press-and-hold.
-// Electron's globalShortcut only fires on press, not release.
+// ─── Global Hotkey ───────────────────────────────────────────────────────────
 
 function setupHotkey() {
-  uIOhook.on("keydown", (e) => {
-    if (e.keycode === UiohookKey.Alt)   altHeld = true;
-    if (e.keycode === UiohookKey.Shift) shiftHeld = true;
-
-    // Toggle on ⌥⇧Space — debounce 300ms to suppress duplicate events
-    if (e.keycode === UiohookKey.Space && altHeld && shiftHeld) {
-      const now = Date.now();
-      if (now - lastToggleMs > 300) {
-        lastToggleMs = now;
-        recordingActive = !recordingActive;
-        console.log(`[hotkey] toggle fired, sending IPC. win=${!!mainWindow} destroyed=${mainWindow?.isDestroyed()}`);
-        mainWindow?.webContents.send("hotkey-toggle");
-      } else {
-        console.log(`[hotkey] debounced (Δ=${now - lastToggleMs}ms)`);
-      }
-    }
+  const ok = globalShortcut.register("Control+Shift+Space", () => {
+    mainWindow?.webContents.send("hotkey-toggle");
   });
-
-  uIOhook.on("keyup", (e) => {
-    if (e.keycode === UiohookKey.Alt)   altHeld = false;
-    if (e.keycode === UiohookKey.Shift) shiftHeld = false;
-  });
-
-  // On macOS, uiohook needs Accessibility permission.
-  // After re-signing the app, macOS resets the grant — check explicitly.
-  const trusted = systemPreferences.isTrustedAccessibilityClient(false);
-  if (!trusted) {
-    console.warn("[hotkey] Accessibility permission not granted — prompting user");
-    accessibilityGranted = false;
-    // Trigger the system prompt (opens the dialog)
-    systemPreferences.isTrustedAccessibilityClient(true);
-    mainWindow?.webContents.once("did-finish-load", () => {
-      mainWindow.webContents.send("hotkey-unavailable");
-    });
-    return;
-  }
-
-  try {
-    uIOhook.start();
-  } catch (err) {
-    console.error("[hotkey] uIOhook failed to start:", err);
+  if (!ok) {
     mainWindow?.webContents.once("did-finish-load", () => {
       mainWindow.webContents.send("hotkey-unavailable");
     });
@@ -169,8 +116,6 @@ function setupHotkey() {
 }
 
 // ─── IPC Handlers ────────────────────────────────────────────────────────────
-
-ipcMain.handle("check-accessibility", () => accessibilityGranted);
 
 ipcMain.handle("paste-text", async (_event, text) => {
   return pasteText(text);
@@ -183,7 +128,7 @@ ipcMain.handle("set-tray-state", (_event, state) => {
     transcribing: "Local Whisper — ⏳ Transcribing...",
     error:        "Local Whisper — ❌ Error",
   };
-  tray.setToolTip(tooltips[state] ?? "Local Whisper — Ready (⌥⇧Space)");
+  tray.setToolTip(tooltips[state] ?? "Local Whisper — Ready (⌃⇧Space)");
 });
 
 // ─── Paste ───────────────────────────────────────────────────────────────────
@@ -223,6 +168,6 @@ app.on("window-all-closed", (e) => {
   e.preventDefault();
 });
 
-app.on("before-quit", () => {
-  uIOhook.stop();
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });

@@ -77,10 +77,9 @@
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
   onMount(async () => {
-    // Register IPC handlers first — before any async work — so we never
-    // miss a hotkey-unavailable message that arrives during model loading.
+    // Register IPC handlers before any async work so we don't miss messages
+    // sent while the Whisper model is loading.
     window.electron?.onHotkeyToggle(() => {
-      console.log("[renderer] hotkey-toggle received, appState=", appState);
       if (appState === "idle") startRecording();
       else if (appState === "recording") stopRecording();
     });
@@ -89,15 +88,6 @@
       appState = "needs-permission";
     });
 
-    // Ask main whether accessibility is already known to be missing.
-    // This covers the case where hotkey-unavailable fired before we mounted.
-    const accessibilityOk = await window.electron?.checkAccessibility();
-    if (accessibilityOk === false) {
-      appState = "needs-permission";
-      return;
-    }
-
-    // Load Whisper model
     try {
       await initWhisper((file, pct) => {
         loadProgress = `${file}: ${Math.round(pct)}%`;
@@ -145,7 +135,7 @@
       <span class="dot pulse red"></span>
       <span>Recording {formatTime(elapsedSecs)}</span>
     </div>
-    <p class="hint">Press ⌥⇧Space again to transcribe</p>
+    <p class="hint">Press ⌃⇧Space again to transcribe</p>
 
   {:else if appState === "transcribing"}
     <div class="status">
@@ -167,7 +157,7 @@
     <p class="hint">Grant access in System Settings → Privacy &amp; Security → Accessibility, then relaunch.</p>
   {/if}
 
-  <footer>⌥⇧Space to start / stop</footer>
+  <footer>⌃⇧Space to start / stop</footer>
 </main>
 
 <style>

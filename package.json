@@ -13,8 +13,7 @@
     "electron:build": "vite build && electron-builder && codesign --force --deep --sign - 'dist/mac-arm64/Local Whisper.app' && xattr -cr 'dist/mac-arm64/Local Whisper.app'"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.0.1",
-    "uiohook-napi": "^1.5.5"
+    "@huggingface/transformers": "^4.0.1"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^3.0.0",
@@ -32,11 +31,10 @@
       "preload.cjs",
       "icons/**/*"
     ],
-    "asarUnpack": [
-      "node_modules/uiohook-napi/**/*"
-    ],
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "icons/icon.icns",
       "category": "public.app-category.utilities",
       "entitlementsInherit": "entitlements.mac.plist",
