@@ -77,6 +77,26 @@
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
   onMount(async () => {
+    // Register IPC handlers first — before any async work — so we never
+    // miss a hotkey-unavailable message that arrives during model loading.
+    window.electron?.onHotkeyToggle(() => {
+      console.log("[renderer] hotkey-toggle received, appState=", appState);
+      if (appState === "idle") startRecording();
+      else if (appState === "recording") stopRecording();
+    });
+
+    window.electron?.onHotkeyUnavailable(() => {
+      appState = "needs-permission";
+    });
+
+    // Ask main whether accessibility is already known to be missing.
+    // This covers the case where hotkey-unavailable fired before we mounted.
+    const accessibilityOk = await window.electron?.checkAccessibility();
+    if (accessibilityOk === false) {
+      appState = "needs-permission";
+      return;
+    }
+
     // Load Whisper model
     try {
       await initWhisper((file, pct) => {
@@ -87,18 +107,7 @@
     } catch (e) {
       appState = "error";
       errorMsg = `Model load failed: ${e.message}`;
-      return;
     }
-
-    // Toggle: first combo starts recording, second stops + transcribes
-    window.electron?.onHotkeyToggle(() => {
-      if (appState === "idle") startRecording();
-      else if (appState === "recording") stopRecording();
-    });
-
-    window.electron?.onHotkeyUnavailable(() => {
-      appState = "needs-permission";
-    });
   });
 
   onDestroy(() => {

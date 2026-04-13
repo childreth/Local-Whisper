@@ -32,6 +32,9 @@
       "preload.cjs",
       "icons/**/*"
     ],
+    "asarUnpack": [
+      "node_modules/uiohook-napi/**/*"
+    ],
     "mac": {
       "target": ["dmg"],
       "icon": "icons/icon.icns",

@@ -23,6 +23,11 @@ let tray = null;
 let altHeld = false;
 let shiftHeld = false;
 let recordingActive = false;
+let lastToggleMs = 0;
+
+// Set to false if accessibility permission is missing so the renderer
+// can query it synchronously after mounting (race-condition fix).
+let accessibilityGranted = true;
 
 // ─── Window ──────────────────────────────────────────────────────────────────
 
@@ -120,10 +125,17 @@ function setupHotkey() {
     if (e.keycode === UiohookKey.Alt)   altHeld = true;
     if (e.keycode === UiohookKey.Shift) shiftHeld = true;
 
-    // Toggle on ⌥⇧Space — ignore key-repeat events
-    if (e.keycode === UiohookKey.Space && altHeld && shiftHeld && !e.repeat) {
-      recordingActive = !recordingActive;
-      mainWindow?.webContents.send("hotkey-toggle");
+    // Toggle on ⌥⇧Space — debounce 300ms to suppress duplicate events
+    if (e.keycode === UiohookKey.Space && altHeld && shiftHeld) {
+      const now = Date.now();
+      if (now - lastToggleMs > 300) {
+        lastToggleMs = now;
+        recordingActive = !recordingActive;
+        console.log(`[hotkey] toggle fired, sending IPC. win=${!!mainWindow} destroyed=${mainWindow?.isDestroyed()}`);
+        mainWindow?.webContents.send("hotkey-toggle");
+      } else {
+        console.log(`[hotkey] debounced (Δ=${now - lastToggleMs}ms)`);
+      }
     }
   });
 
@@ -137,6 +149,7 @@ function setupHotkey() {
   const trusted = systemPreferences.isTrustedAccessibilityClient(false);
   if (!trusted) {
     console.warn("[hotkey] Accessibility permission not granted — prompting user");
+    accessibilityGranted = false;
     // Trigger the system prompt (opens the dialog)
     systemPreferences.isTrustedAccessibilityClient(true);
     mainWindow?.webContents.once("did-finish-load", () => {
@@ -156,6 +169,8 @@ function setupHotkey() {
 }
 
 // ─── IPC Handlers ────────────────────────────────────────────────────────────
+
+ipcMain.handle("check-accessibility", () => accessibilityGranted);
 
 ipcMain.handle("paste-text", async (_event, text) => {
   return pasteText(text);
