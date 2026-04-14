@@ -7,4 +7,5 @@ contextBridge.exposeInMainWorld("electron", {
   onHotkeyUnavailable:(cb) => ipcRenderer.on("hotkey-unavailable",() => cb()),
   pasteText:          (text)  => ipcRenderer.invoke("paste-text",     text),
   setTrayState:       (state) => ipcRenderer.invoke("set-tray-state", state),
+  getFrontmostApp:    ()      => ipcRenderer.invoke("get-frontmost-app"),
 });

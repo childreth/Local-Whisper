@@ -36,15 +36,26 @@ export async function initWhisper(onProgress) {
 export async function transcribeBuffer(arrayBuffer) {
   if (!pipe) throw new Error("Whisper model not loaded");
 
+  const tStart = performance.now();
+
+  const tDecodeStart = performance.now();
   const { samples, sampleRate } = await decodeAudioBuffer(arrayBuffer);
   const resampled = sampleRate === TARGET_SR ? samples : await resampleTo16kHz(samples, sampleRate);
   const audio = normalizeAudio(resampled);
+  const decodeMs = performance.now() - tDecodeStart;
 
   const rms = Math.sqrt(audio.reduce((s, x) => s + x * x, 0) / audio.length);
-  console.log(`[whisper] audio: ${audio.length} samples @ ${TARGET_SR}Hz, RMS=${rms.toFixed(5)}`);
+  const audioDurationSec = audio.length / TARGET_SR;
+  console.log(`[whisper] audio: ${audio.length} samples @ ${TARGET_SR}Hz (${audioDurationSec.toFixed(2)}s), RMS=${rms.toFixed(5)}, decode+resample=${decodeMs.toFixed(0)}ms`);
   if (rms < 0.0001) throw new Error("Audio is silent — check microphone level");
 
+  const tInferStart = performance.now();
   const result = await pipe(audio, { language: "en", task: "transcribe" });
+  const inferMs = performance.now() - tInferStart;
+  const totalMs = performance.now() - tStart;
+  const rtf = inferMs / 1000 / audioDurationSec;
+  console.log(`[whisper] transcribe: inference=${inferMs.toFixed(0)}ms, total=${totalMs.toFixed(0)}ms, RTF=${rtf.toFixed(2)}x`);
+
   return (result.text || "").trim();
 }
 

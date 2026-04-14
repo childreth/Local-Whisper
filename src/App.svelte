@@ -3,7 +3,7 @@
   import { initWhisper, transcribeBuffer } from "./lib/whisper.js";
 
   // ─── State ──────────────────────────────────────────────────────────────
-  /** @type {"loading" | "idle" | "recording" | "transcribing" | "error" | "needs-permission"} */
+  /** @type {"loading" | "idle" | "recording" | "transcribing" | "error" | "needs-permission" | "needs-accessibility"} */
   let appState    = "loading";
   let lastText    = "";
   let errorMsg    = "";
@@ -15,6 +15,11 @@
   let mediaStream  = null;
   let recorder     = null;
   let audioChunks  = [];
+
+  // Frontmost app tracking
+  let frontmostApp = "";
+  let frontmostTimer = null;
+  const SELF_NAMES = new Set(["Electron", "Local Whisper", "local-whisper"]);
 
   // ─── Helpers ────────────────────────────────────────────────────────────
   function formatTime(secs) {
@@ -71,8 +76,18 @@
       window.electron?.setTrayState("idle");
     } catch (e) {
       console.error("[transcribe]", e);
+      if (e.message?.includes("ACCESSIBILITY_DENIED")) {
+        appState = "needs-accessibility";
+        window.electron?.setTrayState("error");
+        return;
+      }
       setError(e.message || "Transcription failed");
     }
+  }
+
+  function dismissAccessibility() {
+    appState = "idle";
+    window.electron?.setTrayState("idle");
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -88,6 +103,14 @@
       appState = "needs-permission";
     });
 
+    // Poll frontmost app so the UI shows where dictation will land
+    const pollFrontmost = async () => {
+      const name = await window.electron?.getFrontmostApp();
+      if (name && !SELF_NAMES.has(name)) frontmostApp = name;
+    };
+    pollFrontmost();
+    frontmostTimer = setInterval(pollFrontmost, 1000);
+
     try {
       await initWhisper((file, pct) => {
         loadProgress = `${file}: ${Math.round(pct)}%`;
@@ -102,6 +125,7 @@
 
   onDestroy(() => {
     clearInterval(recordingTimer);
+    clearInterval(frontmostTimer);
     mediaStream?.getTracks().forEach((t) => t.stop());
   });
 </script>
@@ -155,6 +179,26 @@
       <span>Accessibility permission required</span>
     </div>
     <p class="hint">Grant access in System Settings → Privacy &amp; Security → Accessibility, then relaunch.</p>
+
+  {:else if appState === "needs-accessibility"}
+    <div class="status">
+      <span class="dot red"></span>
+      <span class="error-text">Can't paste — Accessibility blocked</span>
+    </div>
+    <p class="hint">
+      Transcription saved to clipboard. To auto-paste:<br/>
+      1. Open <b>System Settings → Privacy &amp; Security → Accessibility</b><br/>
+      2. Enable <b>Local Whisper</b> (or <b>Electron</b> in dev)<br/>
+      3. If already listed, toggle it off and on, then relaunch
+    </p>
+    {#if lastText}
+      <p class="last-text">"{lastText}"</p>
+    {/if}
+    <button class="dismiss" on:click={dismissAccessibility}>Dismiss</button>
+  {/if}
+
+  {#if frontmostApp}
+    <p class="target">→ {frontmostApp}</p>
   {/if}
 
   <footer>⌃⇧Space to start / stop</footer>
@@ -234,9 +278,31 @@
     font-size: 13px;
   }
 
+  .target {
+    font-size: 11px;
+    color: rgba(255,255,255,0.55);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   footer {
     font-size: 10px;
     color: rgba(255,255,255,0.25);
     margin-top: 4px;
   }
+
+  .dismiss {
+    -webkit-app-region: no-drag;
+    align-self: flex-start;
+    font-size: 11px;
+    padding: 4px 10px;
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .dismiss:hover { background: rgba(255,255,255,0.18); }
 </style>

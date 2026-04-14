@@ -121,6 +121,19 @@ ipcMain.handle("paste-text", async (_event, text) => {
   return pasteText(text);
 });
 
+ipcMain.handle("get-frontmost-app", async () => {
+  return new Promise((resolve) => {
+    execFile(
+      "osascript",
+      ["-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+      (err, stdout) => {
+        if (err) return resolve(null);
+        resolve(stdout.trim() || null);
+      }
+    );
+  });
+});
+
 ipcMain.handle("set-tray-state", (_event, state) => {
   if (!tray) return;
   const tooltips = {
@@ -135,18 +148,36 @@ ipcMain.handle("set-tray-state", (_event, state) => {
 
 function pasteText(text) {
   return new Promise((resolve, reject) => {
+    const tStart = Date.now();
+    console.log(`[paste] starting: ${text.length} chars`);
     const pbcopy = execFile("pbcopy", (err) => {
-      if (err) return reject(new Error(`pbcopy: ${err.message}`));
+      if (err) {
+        console.error(`[paste] pbcopy failed:`, err);
+        return reject(new Error(`pbcopy: ${err.message}`));
+      }
+      console.log(`[paste] pbcopy ok (${Date.now() - tStart}ms), dispatching ⌘V`);
       setTimeout(() => {
         execFile(
           "osascript",
           ["-e", 'tell application "System Events" to keystroke "v" using {command down}'],
-          (err2) => {
-            if (err2) reject(new Error(`osascript: ${err2.message}`));
-            else resolve();
+          (err2, stdout, stderr) => {
+            if (err2) {
+              console.error(`[paste] osascript failed (${Date.now() - tStart}ms):`, err2.message, stderr);
+              const msg = `${err2.message} ${stderr || ""}`;
+              if (msg.includes("1002") || msg.includes("not allowed to send keystrokes") || msg.includes("not authorized")) {
+                return reject(new Error("ACCESSIBILITY_DENIED"));
+              }
+              return reject(new Error(`osascript: ${err2.message}`));
+            }
+            console.log(`[paste] done (${Date.now() - tStart}ms)`);
+            resolve();
           }
         );
       }, 80);
+    });
+    pbcopy.stdin.on("error", (err) => {
+      console.error(`[paste] pbcopy stdin error:`, err);
+      reject(new Error(`pbcopy stdin: ${err.message}`));
     });
     pbcopy.stdin.write(text);
     pbcopy.stdin.end();
