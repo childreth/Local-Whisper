@@ -50,7 +50,12 @@ export async function transcribeBuffer(arrayBuffer) {
   if (rms < 0.0001) throw new Error("Audio is silent — check microphone level");
 
   const tInferStart = performance.now();
-  const result = await pipe(audio, { language: "en", task: "transcribe" });
+  const result = await pipe(audio, {
+    language: "en",
+    task: "transcribe",
+    chunk_length_s: 30,
+    stride_length_s: 5,
+  });
   const inferMs = performance.now() - tInferStart;
   const totalMs = performance.now() - tStart;
   const rtf = inferMs / 1000 / audioDurationSec;
