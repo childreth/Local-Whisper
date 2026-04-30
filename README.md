@@ -73,7 +73,7 @@ Local Whisper/
 │   └── lib/
 │       └── whisper.js  # Transcription logic
 ├── main.js             # Electron main process
-├── preload.js          # Electron preload script
+├── preload.cjs         # Electron preload script
 ├── index.html
 ├── icons/
 ├── build-mac.sh        # Build + TCC reset script
