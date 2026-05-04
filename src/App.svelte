@@ -21,6 +21,9 @@
   let frontmostTimer = null;
   const SELF_NAMES = new Set(["Electron", "Local Whisper", "local-whisper"]);
 
+  // Waveform bars (22 of them, matches design)
+  const WAVE_BARS = Array.from({ length: 22 }, (_, i) => 20 + Math.sin(i * 1.3) * 14);
+
   // ─── Helpers ────────────────────────────────────────────────────────────
   function formatTime(secs) {
     const m = String(Math.floor(secs / 60)).padStart(2, "0");
@@ -92,8 +95,6 @@
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────
   onMount(async () => {
-    // Register IPC handlers before any async work so we don't miss messages
-    // sent while the Whisper model is loading.
     window.electron?.onHotkeyToggle(() => {
       if (appState === "idle") startRecording();
       else if (appState === "recording") stopRecording();
@@ -103,7 +104,6 @@
       appState = "needs-permission";
     });
 
-    // Poll frontmost app so the UI shows where dictation will land
     const pollFrontmost = async () => {
       const name = await window.electron?.getFrontmostApp();
       if (name && !SELF_NAMES.has(name)) frontmostApp = name;
@@ -128,181 +128,276 @@
     clearInterval(frontmostTimer);
     mediaStream?.getTracks().forEach((t) => t.stop());
   });
+
+  // ─── Derived UI vars ────────────────────────────────────────────────────
+  $: surfaceMode =
+    appState === "recording" ? "coral" :
+    appState === "transcribing" || appState === "loading" ? "dark" :
+    "cream";
+
+  $: statusLabel =
+    appState === "loading"             ? "Loading model" :
+    appState === "idle"                ? "Ready" :
+    appState === "recording"           ? `Recording ${formatTime(elapsedSecs)}` :
+    appState === "transcribing"        ? "Processing" :
+    appState === "error"               ? "Error" :
+    appState === "needs-permission"    ? "Permission needed" :
+    appState === "needs-accessibility" ? "Accessibility blocked" :
+    "Ready";
 </script>
 
 <!-- ─── UI ─────────────────────────────────────────────────────────────── -->
-<main
-  class="container"
-  class:recording={appState === "recording"}
-  class:error={appState === "error"}
->
-  {#if appState === "loading"}
-    <div class="status">
-      <span class="dot pulse grey"></span>
-      <span>Loading model...</span>
-    </div>
-    {#if loadProgress}
-      <p class="hint">{loadProgress}</p>
-    {/if}
+<main class="popover" data-surface={surfaceMode}>
+  <!-- Status row -->
+  <div class="status-row">
+    <span class="dot" class:pulse={appState === "recording" || appState === "transcribing" || appState === "loading"}></span>
+    <span class="label">{statusLabel}</span>
+  </div>
 
-  {:else if appState === "idle"}
-    <div class="status">
-      <span class="dot grey"></span>
-      <span>Ready</span>
+  <!-- Body: waveform when recording, transcript otherwise -->
+  {#if appState === "recording"}
+    <div class="waveform" aria-hidden="true">
+      {#each WAVE_BARS as h, i}
+        <span class="bar" style="height: {h}%; animation-delay: {i * 0.04}s"></span>
+      {/each}
     </div>
-    {#if lastText}
-      <p class="last-text">"{lastText}"</p>
-    {/if}
-
-  {:else if appState === "recording"}
-    <div class="status">
-      <span class="dot pulse red"></span>
-      <span>Recording {formatTime(elapsedSecs)}</span>
-    </div>
-    <p class="hint">Press ⌃⇧Space again to transcribe</p>
-
+  {:else if appState === "loading"}
+    <p class="transcript dim">{loadProgress || "Initializing Whisper…"}</p>
   {:else if appState === "transcribing"}
-    <div class="status">
-      <span class="dot pulse amber"></span>
-      <span>Transcribing...</span>
-    </div>
-
+    <p class="transcript dim">Transcribing…</p>
   {:else if appState === "error"}
-    <div class="status">
-      <span class="dot red"></span>
-      <span class="error-text">{errorMsg || "Transcription failed"}</span>
-    </div>
-
+    <p class="transcript error">{errorMsg || "Transcription failed"}</p>
   {:else if appState === "needs-permission"}
-    <div class="status">
-      <span class="dot red"></span>
-      <span>Accessibility permission required</span>
-    </div>
-    <p class="hint">Grant access in System Settings → Privacy &amp; Security → Accessibility, then relaunch.</p>
-
+    <p class="transcript dim">Grant access in System Settings → Privacy &amp; Security → Accessibility, then relaunch.</p>
   {:else if appState === "needs-accessibility"}
-    <div class="status">
-      <span class="dot red"></span>
-      <span class="error-text">Can't paste — Accessibility blocked</span>
-    </div>
-    <p class="hint">
-      Transcription saved to clipboard. To auto-paste:<br/>
-      1. Open <b>System Settings → Privacy &amp; Security → Accessibility</b><br/>
-      2. Enable <b>Local Whisper</b> (or <b>Electron</b> in dev)<br/>
-      3. If already listed, toggle it off and on, then relaunch
+    <p class="transcript dim">
+      Saved to clipboard. Enable <b>Local Whisper</b> in System Settings → Privacy &amp; Security → Accessibility.
     </p>
     {#if lastText}
-      <p class="last-text">"{lastText}"</p>
+      <p class="transcript">"{lastText}"</p>
     {/if}
     <button class="dismiss" on:click={dismissAccessibility}>Dismiss</button>
+  {:else if lastText}
+    <p class="transcript">"{lastText}"</p>
+  {:else}
+    <p class="transcript placeholder">Press the shortcut to dictate</p>
   {/if}
 
-  {#if frontmostApp}
-    <p class="target">→ {frontmostApp}</p>
-  {/if}
-
-  <footer>⌃⇧Space to start / stop</footer>
+  <!-- Meta row: app context + shortcut -->
+  <div class="meta-row">
+    <span class="app-chip">
+      <span class="arrow">→</span>{frontmostApp || "—"}
+    </span>
+    <span class="shortcut">⌃⇧Space to start / stop</span>
+  </div>
 </main>
 
 <style>
   :global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
   :global(body) {
     background: transparent;
-    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased;
     user-select: none;
     -webkit-user-select: none;
   }
 
-  .container {
-    width: 320px;
-    min-height: 100px;
-    background: rgba(30, 30, 32, 0.92);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255,255,255,0.12);
+  /* ─── Design tokens ────────────────────────────────────────────────── */
+  .popover {
+    --coral:        #cc785c;
+    --ink:          #141413;
+    --body:        #3d3d3a;
+    --muted:        #6c6a64;
+    --muted-soft:   #8e8b82;
+    --hairline:     #e6dfd8;
+    --canvas:       #faf9f5;
+    --surface-dark: #181715;
+    --on-dark:      #faf9f5;
+    --on-dark-soft: #a09d96;
+    --accent-teal:  #5db8a6;
+    --error:        #c64545;
+
+    --serif: 'Cormorant Garamond', 'Tiempos Headline', Georgia, serif;
+    --sans:  Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono:  'JetBrains Mono', ui-monospace, monospace;
+
+    width: 340px;
     border-radius: 14px;
-    padding: 18px 20px 14px;
+    padding: 20px 24px 18px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    color: #fff;
-    transition: background 0.2s;
-    -webkit-app-region: drag; /* Electron drag region (replaces data-tauri-drag-region) */
-  }
-  .container.recording { background: rgba(40, 20, 20, 0.94); }
-  .container.error     { background: rgba(40, 20, 20, 0.94); }
+    gap: 14px;
+    font-family: var(--sans);
+    -webkit-app-region: drag;
+    transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease, color 0.3s;
 
-  .status {
+    /* Default = cream */
+    background: var(--canvas);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    box-shadow: 0 2px 12px rgba(20,20,19,0.08);
+  }
+
+  .popover[data-surface="coral"] {
+    background: var(--coral);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.15);
+    box-shadow: 0 8px 40px rgba(204,120,92,0.5);
+  }
+
+  .popover[data-surface="dark"] {
+    background: var(--surface-dark);
+    color: var(--on-dark);
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+  }
+
+  /* ─── Status row ───────────────────────────────────────────────────── */
+  .status-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 14px;
+    gap: 9px;
+  }
+  .label {
+    font-family: var(--sans);
+    font-size: 17px;
     font-weight: 500;
+    letter-spacing: -0.2px;
+    color: inherit;
   }
 
   .dot {
-    width: 9px; height: 9px;
+    width: 10px; height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
+    display: inline-block;
+    position: relative;
   }
-  .dot.grey  { background: #888; }
-  .dot.red   { background: #ff3b30; }
-  .dot.amber { background: #ff9500; }
-  .dot.pulse { animation: pulse 1.2s ease-in-out infinite; }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%       { opacity: 0.5; transform: scale(0.85); }
+  /* Cream-state dot: hollow outline */
+  .popover[data-surface="cream"] .dot {
+    background: transparent;
+    border: 2px solid var(--muted-soft);
+  }
+  .popover[data-surface="cream"] .status-row .dot.pulse {
+    border-color: transparent;
+    background: var(--accent-teal);
+    box-shadow: 0 0 0 3px rgba(93,184,166,0.13);
+  }
+  /* Coral-state dot */
+  .popover[data-surface="coral"] .dot {
+    background: rgba(255,255,255,0.9);
+  }
+  /* Dark-state dot (processing/loading) */
+  .popover[data-surface="dark"] .dot {
+    background: var(--accent-teal);
+    box-shadow: 0 0 0 3px rgba(93,184,166,0.13);
+  }
+  .dot.pulse::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.35;
+    animation: pulseRing 1.4s ease-out infinite;
+    color: var(--accent-teal);
+  }
+  .popover[data-surface="coral"] .dot.pulse::before {
+    color: rgba(255,255,255,0.9);
   }
 
-  .last-text {
-    font-size: 12px;
-    color: rgba(255,255,255,0.5);
+  @keyframes pulseRing {
+    0%   { transform: scale(1);   opacity: 0.35; }
+    100% { transform: scale(2.6); opacity: 0;    }
+  }
+
+  /* ─── Transcript ───────────────────────────────────────────────────── */
+  .transcript {
+    font-family: var(--serif);
     font-style: italic;
-    line-height: 1.4;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    font-weight: 400;
+    font-size: 16px;
+    line-height: 1.55;
+    margin: 0;
+    transition: color 0.3s, opacity 0.3s;
+  }
+  .popover[data-surface="cream"] .transcript { color: var(--body); }
+  .popover[data-surface="coral"]  .transcript { color: rgba(255,255,255,0.86); }
+  .popover[data-surface="dark"]   .transcript { color: var(--on-dark-soft); }
+
+  .transcript.dim         { opacity: 0.55; }
+  .transcript.placeholder { opacity: 0.45; }
+  .transcript.error       { color: var(--error); font-style: normal; font-family: var(--sans); font-size: 14px; }
+
+  /* ─── Waveform (recording) ─────────────────────────────────────────── */
+  .waveform {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 28px;
+  }
+  .bar {
+    display: block;
+    width: 3px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.7);
+    animation: waveBar 0.8s ease-in-out infinite;
+    transform-origin: center;
+  }
+  @keyframes waveBar {
+    0%, 100% { transform: scaleY(0.4); }
+    50%       { transform: scaleY(1.0); }
   }
 
-  .hint {
-    font-size: 11px;
-    color: rgba(255,255,255,0.4);
+  /* ─── Meta row ─────────────────────────────────────────────────────── */
+  .meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
-
-  .error-text {
-    color: #ff6b6b;
+  .app-chip {
+    font-family: var(--sans);
     font-size: 13px;
-  }
-
-  .target {
-    font-size: 11px;
-    color: rgba(255,255,255,0.55);
     font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 60%;
+  }
+  .arrow { opacity: 0.7; }
+
+  .shortcut {
+    font-family: var(--mono);
+    font-size: 11px;
+    opacity: 0.7;
+    white-space: nowrap;
   }
 
-  footer {
-    font-size: 10px;
-    color: rgba(255,255,255,0.25);
-    margin-top: 4px;
-  }
+  /* Surface-specific muted color for meta row */
+  .popover[data-surface="cream"] .app-chip { color: var(--ink); }
+  .popover[data-surface="cream"] .shortcut { color: var(--muted-soft); }
+  .popover[data-surface="coral"] .app-chip,
+  .popover[data-surface="coral"] .shortcut { color: rgba(255,255,255,0.78); }
+  .popover[data-surface="dark"]  .app-chip { color: var(--on-dark); }
+  .popover[data-surface="dark"]  .shortcut { color: var(--on-dark-soft); }
 
+  /* ─── Dismiss button (needs-accessibility) ─────────────────────────── */
   .dismiss {
     -webkit-app-region: no-drag;
     align-self: flex-start;
-    font-size: 11px;
-    padding: 4px 10px;
-    background: rgba(255,255,255,0.1);
-    color: #fff;
-    border: 1px solid rgba(255,255,255,0.2);
-    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 12px;
+    background: var(--canvas);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
     cursor: pointer;
+    transition: background 0.15s;
   }
-  .dismiss:hover { background: rgba(255,255,255,0.18); }
+  .dismiss:active { background: var(--hairline); }
 </style>

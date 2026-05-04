@@ -19,8 +19,8 @@ let tray = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 320,
-    height: 180,
+    width: 380,
+    height: 220,
     resizable: true,
     frame: false,
     transparent: true,
