@@ -44,7 +44,11 @@ export async function transcribeBuffer(arrayBuffer) {
   const audio = normalizeAudio(resampled);
   const decodeMs = performance.now() - tDecodeStart;
 
-  const rms = Math.sqrt(audio.reduce((s, x) => s + x * x, 0) / audio.length);
+  let sum = 0;
+  for (let i = 0; i < audio.length; i++) {
+    sum += audio[i] * audio[i];
+  }
+  const rms = Math.sqrt(sum / audio.length);
   const audioDurationSec = audio.length / TARGET_SR;
   console.log(`[whisper] audio: ${audio.length} samples @ ${TARGET_SR}Hz (${audioDurationSec.toFixed(2)}s), RMS=${rms.toFixed(5)}, decode+resample=${decodeMs.toFixed(0)}ms`);
   if (rms < 0.0001) throw new Error("Audio is silent — check microphone level");
